@@ -5,6 +5,8 @@ import anthropic
 
 client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY automatically
 
+#Program for stateful claude with system prompt
+
 def add_user_message(messages, text):
     # Logs what the HUMAN said, tagged with role "user"
     messages.append({"role": "user", "content": text})

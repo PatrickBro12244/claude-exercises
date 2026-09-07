@@ -5,6 +5,9 @@ import anthropic
 
 client = anthropic.Anthropic()
 
+#program for formatting claude ouputs using stop sequences and message prefilling
+#message prefilling is deprecated as of 4-6 onwards
+
 def add_user_message(messages, text):
     messages.append({"role": "user", "content": text})
 

@@ -3,6 +3,8 @@ load_dotenv()
 
 import anthropic
 
+#Program for generating claude responses with data streaming
+
 client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY automatically
 
 def add_user_message(messages, text):
