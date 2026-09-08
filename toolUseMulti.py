@@ -1,0 +1,183 @@
+from dotenv import load_dotenv
+load_dotenv()
+
+import datetime
+import math
+import anthropic
+from anthropic.types import Message
+
+client = anthropic.Anthropic()
+
+MODEL = "claude-haiku-4-5-20251001"
+
+
+# Add user message (accepts plain text/content, OR a Message object e.g. tool_results list)
+def add_user_message(messages, message):
+    content = message.content if isinstance(message, Message) else message
+    messages.append({
+        "role": "user",
+        "content": content
+    })
+
+
+# Add assistant message (accepts plain text, OR a Message object e.g. Claude's tool_use turn)
+def add_assistant_message(messages, message):
+    content = message.content if isinstance(message, Message) else message
+    messages.append({
+        "role": "assistant",
+        "content": content
+    })
+
+
+# --- Tool implementations ---
+
+def get_current_datetime(date_format="%Y-%m-%d %H:%M:%S"):
+    if not date_format:
+        raise ValueError("date_format cannot be empty")
+    return datetime.datetime.now().strftime(date_format)
+
+
+def get_remainder(x, y):
+    return math.fmod(x, y)
+
+
+# --- Tool schemas given to Claude ---
+
+get_current_datetime_schema = {
+    "name": "get_current_datetime",
+    "description": (
+        "Returns the current date and time formatted "
+        "according to the specified format."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "date_format": {
+                "type": "string",
+                "description": "A Python strftime format string.",
+                "default": "%Y-%m-%d %H:%M:%S"
+            }
+        },
+        "required": []
+    }
+}
+
+get_remainder_schema = {
+    "name": "get_remainder",
+    "description": "Returns the remainder given two numbers",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "x": {
+                "type": "number",
+                "description": "the first number",
+            },
+            "y": {
+                "type": "number",
+                "description": "the SECOND number",
+            },
+        },
+        "required": ["x", "y"]
+    }
+}
+
+TOOLS = [get_current_datetime_schema, get_remainder_schema]
+
+# Map tool name -> Python function, so we don't need if/elif chains
+TOOL_FUNCTIONS = {
+    "get_current_datetime": get_current_datetime,
+    "get_remainder": get_remainder,
+}
+
+
+def run_tool(tool_use):
+    """Dispatch a single tool_use block to the right function."""
+    func = TOOL_FUNCTIONS.get(tool_use.name)
+    if func is None:
+        return f"Error: unknown tool '{tool_use.name}'"
+
+    try:
+        return func(**tool_use.input)
+    except Exception as e:
+        # Send the error back to Claude instead of crashing the script
+        return f"Error running {tool_use.name}: {e}"
+
+
+def run_tools(message):
+    """Run every tool_use block in a Message and return their tool_result dicts."""
+    tool_requests = [
+        block for block in message.content
+        if block.type == "tool_use"
+    ]
+
+    tool_results = []
+    for tool_use in tool_requests:
+        print("\nSelected content block:")
+        print(tool_use)
+
+        result = run_tool(tool_use)
+
+        print("\nTool result:")
+        print(result)
+
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": tool_use.id,
+            "content": str(result),
+        })
+
+    return tool_results
+
+
+def text_from_message(message):
+    """Join all text blocks in a Message into a single string."""
+    return "\n".join(
+        block.text for block in message.content if block.type == "text"
+    )
+
+
+def chat(messages, system=None, tools=None, model=MODEL):
+    """Thin wrapper around a single Claude API call. Returns the raw Message."""
+    params = {
+        "model": model,
+        "max_tokens": 1000,
+        "messages": messages,
+    }
+
+    if tools:
+        params["tools"] = tools
+
+    if system:
+        params["system"] = system
+
+    message = client.messages.create(**params)
+    return message
+
+
+# -------------------------
+# Test the tool
+# -------------------------
+
+if __name__ == "__main__":
+    messages = []
+
+    add_user_message(
+        messages,
+        "what day is 10 days from now?"
+    )
+
+    while True:
+        response = chat(messages, tools=TOOLS)
+
+        add_assistant_message(messages, response)
+        print("\nClaude's response:")
+        print(response.content)
+
+        if response.stop_reason != "tool_use":
+            break
+
+        tool_results = run_tools(response)
+        add_user_message(messages, tool_results)
+
+    print("\nClaude's final response:")
+    print(text_from_message(response))

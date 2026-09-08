@@ -5,6 +5,8 @@ import anthropic
 
 client = anthropic.Anthropic()
 
+#Program for looping a prompt evaluation. linked to promptEngineering.py
+
 
 def add_user_message(messages, text):
     messages.append({"role": "user", "content": text})
