@@ -8,7 +8,7 @@ from anthropic.types import Message
 
 client = anthropic.Anthropic()
 
-MODEL = "claude-haiku-4-5-20251001"
+MODEL = "claude-sonnet-4-5"
 
 
 # Add user message (accepts plain text/content, OR a Message object e.g. tool_results list)
@@ -17,6 +17,7 @@ def add_user_message(messages, message):
     messages.append({
         "role": "user",
         "content": content
+
     })
 
 
@@ -49,6 +50,7 @@ get_current_datetime_schema = {
         "Returns the current date and time formatted "
         "according to the specified format."
     ),
+    "eager_input_streaming": True, 
     "input_schema": {
         "type": "object",
         "properties": {
@@ -65,6 +67,7 @@ get_current_datetime_schema = {
 get_remainder_schema = {
     "name": "get_remainder",
     "description": "Returns the remainder given two numbers",
+    "eager_input_streaming": True, 
     "input_schema": {
         "type": "object",
         "properties": {
@@ -136,13 +139,14 @@ def text_from_message(message):
     )
 
 
-def chat(messages, system=None, tools=None, model=MODEL):
+def chat(messages, system=None, tools=None, model=MODEL, ):
     """Thin wrapper around a single Claude API call. Returns the raw Message."""
     params = {
         "model": model,
         "max_tokens": 1000,
         "messages": messages,
     }
+    
 
     if tools:
         params["tools"] = tools
@@ -150,8 +154,20 @@ def chat(messages, system=None, tools=None, model=MODEL):
     if system:
         params["system"] = system
 
-    message = client.messages.create(**params)
-    return message
+    with client.messages.stream(**params) as stream:
+           for chunk in stream:
+            if chunk.type == "input_json":
+                # Partial JSON arguments for a tool call
+                print("Partial JSON:", chunk.partial_json)
+
+                # Complete JSON snapshot accumulated so far
+                current_args = chunk.snapshot
+                print("Current args:", current_args)
+
+            elif chunk.type == "text":
+                print(chunk.text, end="", flush=True)
+
+    return stream.get_final_message()
 
 
 # -------------------------
@@ -160,11 +176,10 @@ def chat(messages, system=None, tools=None, model=MODEL):
 
 if __name__ == "__main__":
     messages = []
-
+    
     add_user_message(
         messages,
-        "what day is 10 days from now?"
-
+        "what day is 10 days from now? then get that number and modulo 2 it.",
     )
 
     while True:

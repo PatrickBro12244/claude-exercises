@@ -1,22 +1,27 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import datetime
 import anthropic
+import datetime
 from anthropic.types import ToolParam
 
 client = anthropic.Anthropic()
 
-
-# Add user message
-def add_user_message(messages, text):
-    messages.append({
-        "role": "user",
-        "content": text
-    })
+MODEL = "claude-sonnet-5"
 
 
-# Get Date and Time tool
+def add_user_message(messages, content):
+    messages.append({"role": "user", "content": content})
+
+
+def add_assistant_message(messages, content):
+    messages.append({"role": "assistant", "content": content})
+
+
+def text_from_message(message):
+    return "\n".join(b.text for b in message.content if b.type == "text")
+
+
 def get_current_datetime(date_format="%Y-%m-%d %H:%M:%S"):
     if not date_format:
         raise ValueError("date_format cannot be empty")
@@ -24,96 +29,61 @@ def get_current_datetime(date_format="%Y-%m-%d %H:%M:%S"):
     return datetime.datetime.now().strftime(date_format)
 
 
-# Tool schema given to Claude
 get_current_datetime_schema = ToolParam({
-    "name": "get_current_datetime",
-    "description": (
-        "Returns the current date and time formatted "
-        "according to the specified format."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "date_format": {
-                "type": "string",
-                "description": "A Python strftime format string.",
-                "default": "%Y-%m-%d %H:%M:%S"
-            }
-        },
-        "required": []
-    }
-})
+        "name": "get_current_datetime",
+        "description": (
+            "Returns the current date and time formatted "
+            "according to the specified format."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date_format": {
+                    "type": "string",
+                    "description": (
+                        "A Python strftime format string."
+                    ),
+                    "default": "%Y-%m-%d %H:%M:%S"
+                }
+            },
+            "required": []
+        }
+    })
 
 
-def chat(messages):
-
-    # First API call
-    response = client.messages.create(
-        model="claude-haiku-4-5",
-        max_tokens=1000,
-        messages=messages,
-        tools=[get_current_datetime_schema]
-    )
-
-    print("\nClaude's first response:")
-    print(response.content)
-
-    if response.stop_reason == "tool_use":
-
-        # Add Claude's tool request to the conversation
-        messages.append({
-            "role": "assistant",
-            "content": response.content
-        })
-
-        # Find the ToolUseBlock
-        tool_use = response.content[1]
-
-        print("\nSelected content block:")
-        print(tool_use)
-
-        # Execute the tool
-        result = get_current_datetime(**tool_use.input)
-
-        print("\nTool result:")
-        print(result)
-
-        # Send tool result back to Claude
-        messages.append({
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_use.id,
-                "content": result
-            }]
-        })
-
-        # Second API call
+def run_conversation(messages):
+    while True:
         response = client.messages.create(
-            model="claude-haiku-4-5",
-            max_tokens=1000,
+            model=MODEL,
+            max_tokens=1024,
             messages=messages,
-            tools=[get_current_datetime_schema]
+            tools=[get_current_datetime_schema],
         )
 
-    # Return Claude's final response
-    return response.content[0].text
+        add_assistant_message(messages, response.content)
 
+        if response.stop_reason == "tool_use":
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    result = get_current_datetime(**block.input)
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": str(result),
+                    })
+            add_user_message(messages, tool_results)
+            continue
 
-# -------------------------
-# Test the tool
-# -------------------------
+        return response
+
 
 messages = []
-
 add_user_message(
     messages,
-    "What is the exact current date and time? "
-    "First briefly explain that you will check the current date and time, "
-    "then use the get_current_datetime tool to get the exact value."
+    "What date is it today"
 )
 
-response = chat(messages)
-
+final_response = run_conversation(messages)
 print("\nClaude's final response:")
-print(response)
+print(text_from_message(final_response))
